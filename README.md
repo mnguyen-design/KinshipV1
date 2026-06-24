@@ -1,7 +1,7 @@
 
-  # Create clickable prototype structure
+  # Kinship
 
-  This is a code bundle for Create clickable prototype structure. The original project is available at https://www.figma.com/design/kysWKABdbSW2C3HrPKI4hx/Create-clickable-prototype-structure.
+  This is a code bundle for Kinship. The original project is available at https://www.figma.com/design/kysWKABdbSW2C3HrPKI4hx/Kinship.
 
   ## Running the code
 
