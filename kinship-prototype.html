@@ -17,7 +17,10 @@
     font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     overflow: hidden;
   }
-  #app { width: 100vw; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+  /* No overflow:hidden here — it would clip the .nav/.demobar full-bleed
+     breakout. body{overflow:hidden} still prevents viewport scrolling, and
+     .treebox handles its own overflow. */
+  #app { width: 100%; max-width: 1200px; height: 100vh; margin: 0 auto; display: flex; flex-direction: column; }
 
   .han { font-family: 'Noto Serif SC', 'Songti SC', 'SimSun', serif; }
   .serif { font-family: 'Lora', serif; }
@@ -31,7 +34,13 @@
   .nav {
     height: 58px; background: #EDE4D2; flex-shrink: 0;
     border-bottom: 1px solid rgba(42,31,20,0.10);
-    display: flex; align-items: center; padding: 0 24px; gap: 26px;
+    display: flex; align-items: center; gap: 26px;
+    /* Full-bleed bar inside the capped #app shell: negative margins stretch the
+       background to the viewport edges; matching padding keeps the contents
+       aligned with the 1200px container. Collapses to plain 24px padding
+       whenever the viewport is narrower than the cap. */
+    margin: 0 calc(50% - 50vw);
+    padding: 0 calc(50vw - 50% + 24px);
   }
   .logo { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
   .logo img { display: block; flex-shrink: 0; }
@@ -94,8 +103,11 @@
   /* ── Demo banner ───────────────────────────────────────── */
   .demobar {
     flex-shrink: 0; display: flex; align-items: center; gap: 14px;
-    padding: 9px 24px; background: rgba(200,164,90,0.16);
+    background: rgba(200,164,90,0.16);
     border-bottom: 1px solid rgba(200,164,90,0.35); font-size: 12.5px; color: #6B5B45;
+    /* Same full-bleed breakout as .nav so the top chrome reads as one unit. */
+    margin: 0 calc(50% - 50vw);
+    padding: 9px calc(50vw - 50% + 24px);
   }
   .demobar .dot {
     width: 7px; height: 7px; border-radius: 50%; background: #C8A45A; flex-shrink: 0;
@@ -137,6 +149,10 @@
 
   /* ── Generic ───────────────────────────────────────────── */
   .screen { flex: 1; overflow: hidden; display: flex; }
+  /* Tree screen: the treebox's full-bleed swimlanes must escape to the
+     viewport edges, so this screen must not clip. min-height:0 keeps the
+     flex column from blowing out without overflow:hidden's help. */
+  .screen.screen-bleed { overflow: visible; min-height: 0; }
   .panel { padding: 26px 28px; overflow-y: auto; }
   .eyebrow {
     font-size: 11px; color: #A89880; letter-spacing: 0.10em;
@@ -174,6 +190,7 @@
   .treebox {
     position: relative; overflow: auto; background: transparent;
     cursor: grab; overscroll-behavior: contain;
+    -webkit-user-select: none; user-select: none; /* drag means pan, not text selection */
     display: flex;
     /* No center alignment here: centering a flex child that is BIGGER than a
        scroll container pushes half the overflow past the scroll origin, where
@@ -185,8 +202,16 @@
   /* No size transition: the scroll correction that keeps the cursor anchored
      runs immediately, so an animating width would leave it chasing stale
      dimensions. Smoothness comes from the continuous zoom factor instead. */
-  .treebox [data-tree-svg] { display: block; }
+  /* overflow:visible lets the overdrawn swimlane bands paint past the SVG
+     element (they extend far beyond the viewBox), so the lanes always fill
+     the panel — even when a zoomed-out tree is narrower than its box. The
+     treebox's own overflow still clips them at the panel edge. */
+  .treebox [data-tree-svg] { display: block; overflow: visible; }
   .treebox.fitted { overflow: hidden; }
+  /* .treebox.bleed (My Family page): full-bleed swimlanes. The actual
+     margins/padding are MEASURED and applied inline by applyZoom() — a pure
+     CSS calc(50% - 50vw) breakout can't stop at the person panel's edge when
+     it is open. Not used on Ask/Bloom, where the tree sits in a card. */
   .zoombar {
     display: flex; align-items: center; gap: 2px; flex-shrink: 0;
     background: #EDE4D2; border: 1px solid rgba(42,31,20,0.14);
@@ -2952,11 +2977,11 @@ function treeSvg(opts) {
   var s = '';
 
   computeLanes().forEach(function (lane) {
-    s += '<g><rect x="-3000" y="' + lane.yTop + '" width="7000" height="' + (lane.yBottom - lane.yTop) +
+    s += '<g><rect x="-20000" y="' + lane.yTop + '" width="47000" height="' + (lane.yBottom - lane.yTop) +
       '" fill="' + lane.color + '"></rect>' +
       '<text x="' + (BOX.x + 10) + '" y="' + (lane.yTop + 14) + '" fill="rgba(42,31,20,0.20)" font-size="9" letter-spacing="0.10em">' +
       lane.label.toUpperCase() + '</text>' +
-      '<line x1="-3000" y1="' + lane.yBottom + '" x2="4000" y2="' + lane.yBottom +
+      '<line x1="-20000" y1="' + lane.yBottom + '" x2="27000" y2="' + lane.yBottom +
       '" stroke="rgba(42,31,20,0.06)" stroke-width="1"></line></g>';
   });
 
@@ -3178,26 +3203,67 @@ var ZOOM_MIN = 0.18, ZOOM_MAX = 2.5;
 /* Fit shows the whole tree at once — constrained by both axes, so nothing is
    left off the bottom. The swimlane bands still reach the panel edges because
    they are drawn far wider than the viewBox and the SVG fills its container. */
+/* A full-bleed treebox spans the viewport, but the tree should still fit the
+   CAPPED column — only the swimlanes bleed. So fit against the parent's
+   content box, not the bled box itself. */
+function fitWidthFor(box) {
+  if (box && box.classList && box.classList.contains('bleed') && box.parentElement) {
+    var p = box.parentElement, cs = getComputedStyle(p);
+    return p.clientWidth - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0);
+  }
+  return box ? box.clientWidth : 0;
+}
 function fitScaleFor(box) {
   if (!box || !box.clientWidth) return 0.5;
-  var byW = box.clientWidth / TREE_W;
+  var byW = fitWidthFor(box) / TREE_W;
   var byH = box.clientHeight ? box.clientHeight / TREE_H : byW;
   return clampZoom(Math.min(byW, byH));
 }
 function clampZoom(z) { return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z)); }
 
+/* Measured full-bleed for .treebox.bleed: stretch the panel to the viewport
+   edge on each free side, with matching padding so the tree itself stays in
+   the capped column (same treatment as .nav). The right side is skipped while
+   the person panel occupies it (data-bleed-right="0"). Reset-then-measure
+   makes this idempotent, so it can run on every render and resize. */
+function applyBleed() {
+  var boxes = document.querySelectorAll('.treebox.bleed');
+  for (var i = 0; i < boxes.length; i++) {
+    var b = boxes[i];
+    b.style.marginLeft = b.style.marginRight = '0px';
+    b.style.paddingLeft = b.style.paddingRight = '0px';
+    var r = b.getBoundingClientRect();
+    var vw = document.documentElement.clientWidth;
+    var gL = Math.max(0, r.left), gR = Math.max(0, vw - r.right);
+    b.style.marginLeft = -gL + 'px'; b.style.paddingLeft = gL + 'px';
+    if (b.getAttribute('data-bleed-right') !== '0') {
+      b.style.marginRight = -gR + 'px'; b.style.paddingRight = gR + 'px';
+    }
+  }
+}
+
 /* Applies the current zoom to every tree on screen. Called after each render. */
 function applyZoom() {
+  applyBleed();
   var svgs = document.querySelectorAll('[data-tree-svg]');
   for (var i = 0; i < svgs.length; i++) {
     var svg = svgs[i];
     var box = svg.closest ? svg.closest('.treebox') : svg.parentElement;
 
     if (STATE.zoom === null) {
-      // Fill the panel and let the viewBox scale to fit inside it. The whole
-      // tree is visible, centered, with no scrolling in either direction.
-      svg.setAttribute('width', '100%');
-      svg.setAttribute('height', '100%');
+      if (box && box.classList.contains('bleed')) {
+        // Full-bleed box: sizing to 100% would fit the tree to the VIEWPORT.
+        // Pixel-size it to the capped column instead; margin:auto centers it
+        // and the overdrawn lanes still paint to the viewport edges.
+        var fs = fitScaleFor(box);
+        svg.setAttribute('width', Math.floor(TREE_W * fs));
+        svg.setAttribute('height', Math.floor(TREE_H * fs));
+      } else {
+        // Fill the panel and let the viewBox scale to fit inside it. The whole
+        // tree is visible, centered, with no scrolling in either direction.
+        svg.setAttribute('width', '100%');
+        svg.setAttribute('height', '100%');
+      }
       svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
       if (box) box.classList.add('fitted');
     } else {
@@ -3245,12 +3311,17 @@ function setZoom(next, box, anchorX, anchorY) {
   box.scrollTop = treeY * next + offAfter.y - anchorY;
 }
 
-/* How far the scaled tree is inset inside its panel when it doesn't fill it. */
+/* How far the scaled tree is inset inside its panel when it doesn't fill it.
+   Accounts for the bleed padding, which can be asymmetric (person panel open):
+   margin:auto centers the SVG in the CONTENT box, not the padding box. */
 function contentOffset(box, scale) {
   var w = TREE_W * scale, h = TREE_H * scale;
+  var cs = getComputedStyle(box);
+  var padL = parseFloat(cs.paddingLeft) || 0, padR = parseFloat(cs.paddingRight) || 0;
+  var padT = parseFloat(cs.paddingTop) || 0, padB = parseFloat(cs.paddingBottom) || 0;
   return {
-    x: Math.max(0, (box.clientWidth - w) / 2),
-    y: Math.max(0, (box.clientHeight - h) / 2)
+    x: padL + Math.max(0, (box.clientWidth - padL - padR - w) / 2),
+    y: padT + Math.max(0, (box.clientHeight - padT - padB - h) / 2)
   };
 }
 
@@ -3924,8 +3995,11 @@ function treeScreen() {
     return '<button class="pill ' + v + (active ? ' active' : '') + '" data-act="side-filter" data-value="' + v + '">' + label + '</button>';
   };
 
-  var h = '<div style="display:flex;height:100%;width:100%;overflow:hidden">';
-  h += '<div style="flex:1;display:flex;flex-direction:column;padding:16px 20px 10px;overflow:hidden;min-width:0">';
+  /* overflow:visible (not hidden) on these two wrappers: the treebox's
+     full-bleed swimlanes must escape to the viewport edges. Sizing is already
+     guarded by min-width:0 / min-height:0 on the flex children. */
+  var h = '<div style="display:flex;height:100%;width:100%;overflow:visible">';
+  h += '<div style="flex:1;display:flex;flex-direction:column;padding:16px 20px 10px;overflow:visible;min-width:0">';
 
   h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-shrink:0;gap:12px">' +
     '<div style="flex-shrink:0"><h2 class="serif" style="font-size:19px;font-weight:600;margin:0">' +
@@ -3945,7 +4019,9 @@ function treeScreen() {
     ';flex-shrink:0">ⓘ Legend</button></div>';
 
   h += legend;
-  h += '<div class="treebox scroll" style="flex:1;min-height:0">' + treeSvg() + '</div>';
+  h += '<div class="treebox scroll bleed" data-bleed-right="' +
+    (getPerson(STATE.selectedId) ? '0' : '1') +      // panel open → right edge stays put
+    '" style="flex:1;min-height:0">' + treeSvg() + '</div>';
   h += '<div style="flex-shrink:0;padding-top:5px;display:flex;gap:6px;align-items:center">' +
     '<div style="width:7px;height:7px;border-radius:50%;background:' + C.self + '"></div>' +
     '<span style="font-size:10px;color:' + C.muted + '">Amber dot = term outside verified boundary</span></div>';
@@ -5142,7 +5218,10 @@ function render() {
   } else if (STATE.route === 'onboard') {
     h = onboardScreen();
   } else {
-    h = navHtml() + demoBarHtml() + backupNudgeHtml() + '<div class="screen">' +
+    /* The tree screen's .screen must not clip: its swimlanes bleed to the
+       viewport edges. Other screens keep overflow:hidden. */
+    h = navHtml() + demoBarHtml() + backupNudgeHtml() +
+      '<div class="screen' + (STATE.route === 'tree' ? ' screen-bleed' : '') + '">' +
       (STATE.route === 'tree' ? treeScreen()
         : withFamilyViewNeutral(STATE.route === 'ask' ? askScreen : bloomScreen)) +
       '</div>';
@@ -5847,7 +5926,9 @@ document.addEventListener('wheel', function (e) {
   });
 })();
 
-window.addEventListener('resize', function () { if (STATE.zoom === null) applyZoom(); });
+/* Always re-run on resize: the fitted tree rescales AND the measured bleed
+   margins depend on the viewport width. applyZoom re-applies both. */
+window.addEventListener('resize', function () { applyZoom(); });
 
 document.addEventListener('input', function (e) {
   if (e.target.id === 'pickerA' || e.target.id === 'pickerB') {
